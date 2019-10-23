@@ -1,0 +1,128 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create Unity ML-Agents Docker Image
+
+Parameters:
+  ProjectName:
+    Description: Project Name for CodeBuild
+    Default: ml-agents-build-test
+    Type: String
+  InputBucketName:
+    Description: Input Bucket Name
+    Default: ml-agents-build-input
+    Type: String
+  OutputBucketName:
+    Description: Output Bucket Name
+    Default: ml-agents-build-output
+    Type: String
+  ECRRepositoryName:
+    Description: ECR Repository Name
+    Default: ml-agents
+    Type: String
+
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${InputBucketName}
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  OutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${OutputBucketName}
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ECRRepositoryName}
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+                - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub CodeBuildPolicy-${ProjectName}
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectName}
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectName}:*
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::codepipeline-${AWS::Region}-*
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::${InputBucketName}/*
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::${OutputBucketName}/*
+                Action:
+                  - s3:PutObject
+              - Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetAuthorizationToken
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref ProjectName
+      Description: this is a test prj
+      ServiceRole: !Ref CodeBuildServiceRole
+      Artifacts:
+        Location: !Ref OutputBucketName
+        Type: S3
+        Name: artifacts
+        Path: !Sub ${ProjectName}
+        NamespaceType: BUILD_ID
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        PrivilegedMode: True
+      Source:
+        Location: !Join [ "/", [ !Ref InputBucketName, "dummy.zip" ] ]
+        Type: S3
+      TimeoutInMinutes: 10
+      Tags:
+        - Key: Name
+          Value: !Ref ProjectName
